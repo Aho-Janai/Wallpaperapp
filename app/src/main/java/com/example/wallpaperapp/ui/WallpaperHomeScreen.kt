@@ -27,13 +27,17 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -49,6 +53,7 @@ import com.example.wallpaperapp.WallpaperViewModel
 import com.example.wallpaperapp.data.SaveKind
 import com.example.wallpaperapp.data.SavedItemEntity
 import com.example.wallpaperapp.data.Wallpaper
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,8 +65,15 @@ fun WallpaperAppScreen(
     val savedItems by viewModel.savedItems.collectAsStateWithLifecycle()
     var selectedTab by rememberSaveable { mutableStateOf("home") }
     var selectedWallpaper by remember { mutableStateOf<Wallpaper?>(null) }
+    var wallpaperToApply by remember { mutableStateOf<Wallpaper?>(null) }
     var wallpaperToSave by remember { mutableStateOf<Wallpaper?>(null) }
     var savedFilter by rememberSaveable { mutableStateOf<SaveKind?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        // no-op to keep the snackbar host semantically initialized
+    }
 
     val visibleSavedItems = when (savedFilter) {
         null -> savedItems
@@ -91,6 +103,11 @@ fun WallpaperAppScreen(
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 16.dp),
         )
+
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     }
 
     selectedWallpaper?.let { wallpaper ->
@@ -100,7 +117,7 @@ fun WallpaperAppScreen(
             WallpaperActionSheet(
                 wallpaper = wallpaper,
                 onApply = {
-                    viewModel.applyWallpaper(wallpaper)
+                    wallpaperToApply = wallpaper
                     selectedWallpaper = null
                 },
                 onSave = {
@@ -111,6 +128,25 @@ fun WallpaperAppScreen(
         }
     }
 
+    wallpaperToApply?.let { wallpaper ->
+        ApplyChoiceDialog(
+            wallpaper = wallpaper,
+            onDismiss = { wallpaperToApply = null },
+            onApply = { kind ->
+                viewModel.applyWallpaper(wallpaper, kind)
+                wallpaperToApply = null
+                scope.launch {
+                    val label = when (kind) {
+                        SaveKind.WALLPAPER -> "Home wallpaper set"
+                        SaveKind.LOCKSCREEN -> "Lock screen set"
+                        SaveKind.SET -> "Home + lock set"
+                    }
+                    snackbarHostState.showSnackbar(label)
+                }
+            }
+        )
+    }
+
     wallpaperToSave?.let { wallpaper ->
         SaveChoiceDialog(
             wallpaper = wallpaper,
@@ -118,6 +154,14 @@ fun WallpaperAppScreen(
             onSave = { kind ->
                 viewModel.saveWallpaper(wallpaper, kind)
                 wallpaperToSave = null
+                scope.launch {
+                    val label = when (kind) {
+                        SaveKind.WALLPAPER -> "Saved as wallpaper"
+                        SaveKind.LOCKSCREEN -> "Saved as lock screen"
+                        SaveKind.SET -> "Saved as set"
+                    }
+                    snackbarHostState.showSnackbar(label)
+                }
             }
         )
     }
@@ -212,6 +256,28 @@ private fun SavedFeed(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun KindBadge(kind: SaveKind) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = when (kind) {
+            SaveKind.WALLPAPER -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+            SaveKind.LOCKSCREEN -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f)
+            SaveKind.SET -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f)
+        },
+    ) {
+        Text(
+            text = when (kind) {
+                SaveKind.WALLPAPER -> "Wallpaper"
+                SaveKind.LOCKSCREEN -> "Lock"
+                SaveKind.SET -> "Set"
+            },
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        )
     }
 }
 
@@ -319,11 +385,8 @@ private fun SavedItemRow(
                     .clip(RoundedCornerShape(12.dp)),
             )
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = item.kind.name.lowercase().replaceFirstChar { it.uppercase() },
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
+                KindBadge(item.kind)
+                Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = item.sourceId,
                     style = MaterialTheme.typography.bodyMedium,
@@ -359,6 +422,16 @@ private fun WallpaperActionSheet(
                 .height(420.dp)
                 .clip(RoundedCornerShape(20.dp)),
         )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            KindBadge(SaveKind.WALLPAPER)
+            wallpaper.aspectRatioLabel()?.let {
+                KindBadge(SaveKind.SET)
+            }
+        }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -400,6 +473,29 @@ private fun WallpaperActionSheet(
             Text("Save Set")
         }
     }
+}
+
+@Composable
+private fun ApplyChoiceDialog(
+    wallpaper: Wallpaper,
+    onDismiss: () -> Unit,
+    onApply: (SaveKind) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Apply wallpaper") },
+        text = { Text("Choose where to set this image.") },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { onApply(SaveKind.WALLPAPER) }) { Text("Home") }
+                TextButton(onClick = { onApply(SaveKind.LOCKSCREEN) }) { Text("Lock") }
+                TextButton(onClick = { onApply(SaveKind.SET) }) { Text("Both") }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
 }
 
 @Composable
