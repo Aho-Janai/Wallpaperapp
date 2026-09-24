@@ -25,7 +25,7 @@ class SourceRegistry @Inject constructor() {
                 }
                 true
             }
-    }
+    }.distinctBy { it.id }
 
     class DemoWallpaperSource : ApiWallpaperSource() {
         override val id: String = "demo"

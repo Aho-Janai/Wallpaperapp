@@ -249,7 +249,10 @@ private fun SavedFeed(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxSize(),
         ) {
-            items(items) { item ->
+            items(
+                items = items,
+                key = { item -> item.wallpaperId },
+            ) { item ->
                 SavedItemRow(
                     item = item,
                     onClick = { onItemClick(item) },
