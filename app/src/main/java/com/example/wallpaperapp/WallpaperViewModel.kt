@@ -71,33 +71,37 @@ class WallpaperViewModel @Inject constructor(
         }
     }
 
-    fun applyWallpaper(wallpaper: Wallpaper, kind: SaveKind = SaveKind.SET) {
-        viewModelScope.launch {
-            val bitmap = withContext(Dispatchers.IO) {
-                val urlString = wallpaper.fullResUrl.ifBlank { wallpaper.thumbnailUrl }
-                loadBitmapFromUrl(urlString)
-            } ?: run {
-                Log.e("WallpaperViewModel", "Unable to load wallpaper bitmap for ${wallpaper.id}")
-                return@launch
-            }
+    suspend fun applyWallpaper(wallpaper: Wallpaper, kind: SaveKind = SaveKind.SET): Boolean = withContext(Dispatchers.IO) {
+        val bitmap = runCatching {
+            val urlString = wallpaper.fullResUrl.ifBlank { wallpaper.thumbnailUrl }
+            loadBitmapFromUrl(urlString)
+        }.getOrNull() ?: return@withContext false
 
-            val wallpaperManager = WallpaperManager.getInstance(appContext)
-            val target = WallpaperApplyTarget.fromKind(kind)
+        val safeBitmap = if (bitmap.config == Bitmap.Config.HARDWARE) {
+            bitmap.copy(Bitmap.Config.ARGB_8888, false)
+        } else {
+            bitmap
+        }
 
-            if (!wallpaperManager.isWallpaperSupported || !wallpaperManager.isSetWallpaperAllowed) {
-                Log.w("WallpaperViewModel", "Wallpaper setting is not supported or allowed on this device")
-                return@launch
-            }
+        val wallpaperManager = WallpaperManager.getInstance(appContext)
+        if (!wallpaperManager.isWallpaperSupported || !wallpaperManager.isSetWallpaperAllowed) {
+            Log.w("WallpaperViewModel", "Wallpaper setting is not supported or allowed on this device")
+            return@withContext false
+        }
 
-            try {
-                if (target == 0) {
-                    wallpaperManager.setBitmap(bitmap)
-                } else {
-                    wallpaperManager.setBitmap(bitmap, null, true, target)
+        try {
+            when (kind) {
+                SaveKind.WALLPAPER -> wallpaperManager.setBitmap(safeBitmap, null, true, WallpaperManager.FLAG_SYSTEM)
+                SaveKind.LOCKSCREEN -> wallpaperManager.setBitmap(safeBitmap, null, true, WallpaperManager.FLAG_LOCK)
+                SaveKind.SET -> {
+                    wallpaperManager.setBitmap(safeBitmap, null, true, WallpaperManager.FLAG_SYSTEM)
+                    wallpaperManager.setBitmap(safeBitmap, null, true, WallpaperManager.FLAG_LOCK)
                 }
-            } catch (error: Exception) {
-                Log.e("WallpaperViewModel", "Failed to apply wallpaper", error)
             }
+            true
+        } catch (error: Exception) {
+            Log.e("WallpaperViewModel", "Failed to apply wallpaper for ${wallpaper.id}", error)
+            false
         }
     }
 

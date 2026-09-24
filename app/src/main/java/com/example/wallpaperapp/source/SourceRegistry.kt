@@ -4,6 +4,9 @@ import com.example.wallpaperapp.data.Wallpaper
 import com.example.wallpaperapp.data.WallpaperRepository
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 
 @Singleton
 class SourceRegistry @Inject constructor() {
@@ -13,19 +16,29 @@ class SourceRegistry @Inject constructor() {
         UnsplashDemoSource(),
     )
 
-    suspend fun abstractFeed(page: Int = 1): List<Wallpaper> = sources.flatMap { source ->
-        source.search(query = "abstract", page = page)
-            .filter { wallpaper ->
-                if (wallpaper.tags.isNotEmpty()) {
-                    val hasAbstractTag = wallpaper.tags.any { it.contains("abstract", ignoreCase = true) }
-                    if (!hasAbstractTag) return@filter false
-                }
-                if (source.id.equals("scraped", ignoreCase = true)) {
-                    return@filter !wallpaper.containsAiHeuristicMarker()
-                }
-                true
+    suspend fun abstractFeed(page: Int = 1, limit: Int = 50): List<Wallpaper> = coroutineScope {
+        val results = sources.map { source ->
+            async {
+                source.search(query = "abstract", page = page)
+                    .filter { wallpaper ->
+                        if (wallpaper.tags.isNotEmpty()) {
+                            val hasAbstractTag = wallpaper.tags.any { it.contains("abstract", ignoreCase = true) }
+                            if (!hasAbstractTag) return@filter false
+                        }
+                        if (source.id.equals("scraped", ignoreCase = true)) {
+                            return@filter !wallpaper.containsAiHeuristicMarker()
+                        }
+                        true
+                    }
             }
-    }.distinctBy { it.id }
+        }
+
+        results.awaitAll()
+            .flatten()
+            .distinctBy { it.id }
+            .shuffled()
+            .take(limit)
+    }
 
     class DemoWallpaperSource : ApiWallpaperSource() {
         override val id: String = "demo"
