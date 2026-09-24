@@ -9,9 +9,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.wallpaperapp.data.SaveKind
 import com.example.wallpaperapp.data.SavedItemEntity
+import com.example.wallpaperapp.data.SettingsStore
 import com.example.wallpaperapp.data.Wallpaper
 import com.example.wallpaperapp.data.WallpaperRepository
-import com.example.wallpaperapp.source.SourceRegistry
+import com.example.wallpaperapp.source.SourceCatalog
+import com.example.wallpaperapp.source.SourceStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.net.HttpURLConnection
@@ -19,8 +21,10 @@ import java.net.URL
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -28,7 +32,8 @@ import kotlinx.coroutines.withContext
 class WallpaperViewModel @Inject constructor(
     @ApplicationContext private val appContext: Context,
     private val repository: WallpaperRepository,
-    private val sourceRegistry: SourceRegistry,
+    private val sourceCatalog: SourceCatalog,
+    private val settingsStore: SettingsStore,
 ) : ViewModel() {
 
     private val _feed = MutableStateFlow(emptyList<Wallpaper>())
@@ -37,20 +42,78 @@ class WallpaperViewModel @Inject constructor(
     private val _savedItems = MutableStateFlow<List<SavedItemEntity>>(emptyList())
     val savedItems: StateFlow<List<SavedItemEntity>> = _savedItems.asStateFlow()
 
+    private val _searchResults = MutableStateFlow<List<Wallpaper>>(emptyList())
+    val searchResults: StateFlow<List<Wallpaper>> = _searchResults.asStateFlow()
+
+    private val _sourceStatuses = MutableStateFlow<List<SourceStatus>>(emptyList())
+    val sourceStatuses: StateFlow<List<SourceStatus>> = _sourceStatuses.asStateFlow()
+
+    val hapticsEnabled = settingsStore.hapticsEnabledFlow.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = true,
+    )
+
+    val dynamicColorsEnabled = settingsStore.dynamicColorsEnabledFlow.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = true,
+    )
+
     init {
         refreshSavedItems()
         refreshFeed()
+        refreshSources()
     }
 
     fun refreshFeed() {
         viewModelScope.launch {
-            _feed.value = sourceRegistry.abstractFeed()
+            _feed.value = sourceCatalog.abstractFeed()
+            refreshSources()
         }
+    }
+
+    fun refreshSources() {
+        _sourceStatuses.value = sourceCatalog.reviewSources()
+    }
+
+    fun searchWallpapers(query: String) {
+        viewModelScope.launch {
+            val trimmed = query.trim()
+            _searchResults.value = if (trimmed.isBlank()) {
+                emptyList()
+            } else {
+                sourceCatalog.searchEnabledSources(query = trimmed, limit = 50)
+            }
+        }
+    }
+
+    fun clearSearch() {
+        _searchResults.value = emptyList()
+        refreshFeed()
+    }
+
+    fun setSourceEnabled(sourceId: String, enabled: Boolean) {
+        sourceCatalog.setSourceEnabled(sourceId, enabled)
+        refreshSources()
+        refreshFeed()
     }
 
     fun refreshSavedItems() {
         viewModelScope.launch {
             _savedItems.value = repository.getSavedItems()
+        }
+    }
+
+    fun setHapticsEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsStore.setHapticsEnabled(enabled)
+        }
+    }
+
+    fun setDynamicColorsEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsStore.setDynamicColorsEnabled(enabled)
         }
     }
 

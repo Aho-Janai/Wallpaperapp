@@ -1,9 +1,7 @@
-package com.example.wallpaperapp.ui
+﻿package com.example.wallpaperapp.ui
 
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,28 +13,43 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
 import androidx.compose.foundation.lazy.staggeredgrid.items
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -50,16 +63,27 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavType
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import coil.compose.AsyncImage
 import com.example.wallpaperapp.WallpaperViewModel
 import com.example.wallpaperapp.data.SaveKind
 import com.example.wallpaperapp.data.SavedItemEntity
 import com.example.wallpaperapp.data.Wallpaper
+import com.example.wallpaperapp.source.SourceStatus
 import kotlinx.coroutines.launch
 
 private data class WallpaperFilters(
@@ -68,7 +92,20 @@ private data class WallpaperFilters(
     val selectedSources: Set<String> = emptySet(),
 )
 
-@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
+private data class BottomNavItem(
+    val route: String,
+    val title: String,
+    val icon: ImageVector,
+) {
+    companion object {
+        val Home = BottomNavItem("home", "Home", Icons.Default.Home)
+        val Discover = BottomNavItem("discover", "Discover", Icons.Default.Search)
+        val Saved = BottomNavItem("saved", "Saved", Icons.Default.Star)
+        val Settings = BottomNavItem("settings", "Settings", Icons.Default.Settings)
+        val entries = listOf(Home, Discover, Saved, Settings)
+    }
+}
+
 @Composable
 fun WallpaperAppScreen(
     modifier: Modifier = Modifier,
@@ -76,16 +113,18 @@ fun WallpaperAppScreen(
 ) {
     val feed by viewModel.feed.collectAsStateWithLifecycle()
     val savedItems by viewModel.savedItems.collectAsStateWithLifecycle()
-    val pagerState = rememberPagerState(initialPage = 0, pageCount = { 2 })
-    val scope = rememberCoroutineScope()
+    val hapticsEnabled by viewModel.hapticsEnabled.collectAsStateWithLifecycle()
+    val dynamicColorsEnabled by viewModel.dynamicColorsEnabled.collectAsStateWithLifecycle()
+    val sourceStatuses by viewModel.sourceStatuses.collectAsStateWithLifecycle()
+    val searchResults by viewModel.searchResults.collectAsStateWithLifecycle()
+    val navController = rememberNavController()
     val snackbarHostState = remember { SnackbarHostState() }
-    var selectedWallpaper by remember { mutableStateOf<Wallpaper?>(null) }
-    var wallpaperToApply by remember { mutableStateOf<Wallpaper?>(null) }
-    var wallpaperToSave by remember { mutableStateOf<Wallpaper?>(null) }
-    var savedFilter by rememberSaveable { mutableStateOf<SaveKind?>(null) }
+    val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
     var filters by remember { mutableStateOf(WallpaperFilters()) }
-    var showSettings by remember { mutableStateOf(false) }
     var filterCategory by remember { mutableStateOf<String?>(null) }
+    var savedFilter by rememberSaveable { mutableStateOf<SaveKind?>(null) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
     val visibleSavedItems = when (savedFilter) {
         null -> savedItems
         SaveKind.WALLPAPER -> savedItems.filter { it.kind == SaveKind.WALLPAPER }
@@ -93,138 +132,148 @@ fun WallpaperAppScreen(
         SaveKind.SET -> savedItems.filter { it.kind == SaveKind.SET }
     }
     val filteredFeed = remember(feed, filters) { applyWallpaperFilters(feed, filters) }
+    val activeFeed = remember(searchQuery, filteredFeed, searchResults) {
+        if (searchQuery.isBlank()) filteredFeed else searchResults
+    }
+    val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
 
-    Box(modifier = modifier.background(MaterialTheme.colorScheme.background)) {
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier.fillMaxSize(),
-            pageSpacing = 0.dp,
-        ) { page ->
-            when (page) {
-                0 -> HomeFeed(
-                    wallpapers = filteredFeed,
-                    filters = filters,
-                    onWallpaperClick = { selectedWallpaper = it },
-                    onOpenFilter = { filterCategory = it },
-                    onUpdateFilters = { filters = it },
+    Scaffold(
+        modifier = modifier,
+        containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        bottomBar = {
+            if (currentRoute in listOf(BottomNavItem.Home.route, BottomNavItem.Discover.route, BottomNavItem.Saved.route, BottomNavItem.Settings.route)) {
+                FloatingNavBar(
+                    currentRoute = currentRoute ?: BottomNavItem.Home.route,
+                    onNavigate = { route ->
+                        if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        navController.navigate(route) {
+                            popUpTo(navController.graph.startDestinationId) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
                 )
-                1 -> SavedFeed(
+            }
+        },
+    ) { innerPadding ->
+        NavHost(
+            navController = navController,
+            startDestination = BottomNavItem.Home.route,
+            modifier = Modifier.padding(innerPadding),
+        ) {
+            composable(BottomNavItem.Home.route) {
+                HomeScreen(
+                    wallpapers = activeFeed,
+                    filters = filters,
+                    searchQuery = searchQuery,
+                    onSearchQueryChange = { query ->
+                        searchQuery = query
+                        if (query.isBlank()) {
+                            viewModel.clearSearch()
+                        } else {
+                            viewModel.searchWallpapers(query)
+                        }
+                    },
+                    onOpenFilter = { category ->
+                        if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        filterCategory = category
+                    },
+                    onUpdateFilters = { filters = it },
+                    onWallpaperClick = { wallpaper ->
+                        if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        navController.navigate("detail/${wallpaper.id}")
+                    },
+                    onApplyWallpaper = { wallpaper ->
+                        scope.launch {
+                            val result = viewModel.applyWallpaper(wallpaper, SaveKind.WALLPAPER)
+                            if (result) snackbarHostState.showSnackbar("Home wallpaper applied")
+                            else snackbarHostState.showSnackbar("Wallpaper could not be applied")
+                        }
+                    },
+                )
+            }
+
+            composable(BottomNavItem.Discover.route) {
+                DiscoverScreen(
+                    wallpapers = activeFeed,
+                    searchQuery = searchQuery,
+                    onSearchQueryChange = { query ->
+                        searchQuery = query
+                        if (query.isBlank()) {
+                            viewModel.clearSearch()
+                        } else {
+                            viewModel.searchWallpapers(query)
+                        }
+                    },
+                    onWallpaperClick = { wallpaper -> navController.navigate("detail/${wallpaper.id}") },
+                    onApplyWallpaper = { wallpaper ->
+                        scope.launch {
+                            val result = viewModel.applyWallpaper(wallpaper, SaveKind.WALLPAPER)
+                            if (result) snackbarHostState.showSnackbar("Wallpaper applied")
+                            else snackbarHostState.showSnackbar("Wallpaper could not be applied")
+                        }
+                    },
+                )
+            }
+
+            composable(BottomNavItem.Saved.route) {
+                SavedScreen(
                     items = visibleSavedItems,
                     activeFilter = savedFilter,
                     onFilterSelected = { savedFilter = it },
-                    onItemClick = { selectedWallpaper = it.toWallpaper() },
+                    onWallpaperClick = { item -> navController.navigate("detail/${item.wallpaperId}") },
                 )
             }
-        }
 
-        FloatingTabBar(
-            selectedPage = pagerState.currentPage,
-            onTabSelected = { index ->
-                scope.launch { pagerState.animateScrollToPage(index) }
-            },
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 16.dp),
-        )
+            composable(BottomNavItem.Settings.route) {
+                SettingsScreen(
+                    hapticsEnabled = hapticsEnabled,
+                    dynamicColorsEnabled = dynamicColorsEnabled,
+                    sourceStatuses = sourceStatuses,
+                    onHapticsChanged = { viewModel.setHapticsEnabled(it) },
+                    onDynamicColorsChanged = { viewModel.setDynamicColorsEnabled(it) },
+                    onSourceToggled = { sourceId, enabled ->
+                        viewModel.setSourceEnabled(sourceId, enabled)
+                    },
+                )
+            }
 
-        FloatingActionButton(
-            onClick = {
-                val luckyWallpaper = filteredFeed.randomOrNull()
-                if (luckyWallpaper == null) {
-                    scope.launch { snackbarHostState.showSnackbar("No wallpapers available right now") }
-                } else {
-                    wallpaperToApply = luckyWallpaper
-                    selectedWallpaper = luckyWallpaper
+            composable(
+                route = "detail/{wallpaperId}",
+                arguments = listOf(navArgument("wallpaperId") { type = NavType.StringType }),
+            ) { backStackEntry ->
+                val wallpaperId = backStackEntry.arguments?.getString("wallpaperId")
+                val wallpaper = feed.firstOrNull { it.id == wallpaperId }
+                    ?: visibleSavedItems.firstOrNull { it.wallpaperId == wallpaperId }?.toWallpaper()
+                if (wallpaper != null) {
+                    WallpaperDetailScreen(
+                        wallpaper = wallpaper,
+                        onBack = { navController.popBackStack() },
+                        onApply = { kind ->
+                            scope.launch {
+                                val result = viewModel.applyWallpaper(wallpaper, kind)
+                                if (result) snackbarHostState.showSnackbar("Wallpaper applied")
+                                else snackbarHostState.showSnackbar("Wallpaper could not be applied")
+                            }
+                        },
+                        onSave = { kind ->
+                            viewModel.saveWallpaper(wallpaper, kind)
+                            scope.launch {
+                                snackbarHostState.showSnackbar("Saved to ${kind.name.lowercase()}")
+                            }
+                        },
+                    )
                 }
-            },
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(start = 32.dp, bottom = 96.dp),
-        ) {
-            Text("⭐")
+            }
         }
-
-        FloatingActionButton(
-            onClick = { showSettings = true },
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 32.dp, bottom = 96.dp),
-        ) {
-            Text("⚙")
-        }
-
-        SnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier.align(Alignment.BottomCenter),
-        )
-    }
-
-    selectedWallpaper?.let { wallpaper ->
-        ModalBottomSheet(onDismissRequest = { selectedWallpaper = null }) {
-            WallpaperActionSheet(
-                wallpaper = wallpaper,
-                onApply = {
-                    wallpaperToApply = wallpaper
-                    selectedWallpaper = null
-                },
-                onSave = {
-                    wallpaperToSave = wallpaper
-                    selectedWallpaper = null
-                },
-            )
-        }
-    }
-
-    wallpaperToApply?.let { wallpaper ->
-        ApplyChoiceDialog(
-            wallpaper = wallpaper,
-            onDismiss = { wallpaperToApply = null },
-            onApply = { kind ->
-                scope.launch {
-                    val success = viewModel.applyWallpaper(wallpaper, kind)
-                    wallpaperToApply = null
-                    if (success) {
-                        val label = when (kind) {
-                            SaveKind.WALLPAPER -> "Home wallpaper set"
-                            SaveKind.LOCKSCREEN -> "Lock screen set"
-                            SaveKind.SET -> "Home + lock set"
-                        }
-                        snackbarHostState.showSnackbar(label)
-                    } else {
-                        snackbarHostState.showSnackbar("Wallpaper could not be applied on this device")
-                    }
-                }
-            },
-        )
-    }
-
-    wallpaperToSave?.let { wallpaper ->
-        SaveChoiceDialog(
-            wallpaper = wallpaper,
-            onDismiss = { wallpaperToSave = null },
-            onSave = { kind ->
-                viewModel.saveWallpaper(wallpaper, kind)
-                wallpaperToSave = null
-                scope.launch {
-                    val label = when (kind) {
-                        SaveKind.WALLPAPER -> "Saved as wallpaper"
-                        SaveKind.LOCKSCREEN -> "Saved as lock screen"
-                        SaveKind.SET -> "Saved as set"
-                    }
-                    snackbarHostState.showSnackbar(label)
-                }
-            },
-        )
-    }
-
-    if (showSettings) {
-        SettingsSheet(onDismiss = { showSettings = false })
     }
 
     filterCategory?.let { category ->
         FilterPickerDialog(
             category = category,
             filters = filters,
+            sourceStatuses = sourceStatuses,
             onDismiss = { filterCategory = null },
             onUpdated = {
                 filters = it
@@ -235,118 +284,330 @@ fun WallpaperAppScreen(
 }
 
 @Composable
-private fun HomeFeed(
-    wallpapers: List<Wallpaper>,
-    filters: WallpaperFilters,
-    onWallpaperClick: (Wallpaper) -> Unit,
-    onOpenFilter: (String) -> Unit,
-    onUpdateFilters: (WallpaperFilters) -> Unit,
+private fun FloatingNavBar(
+    currentRoute: String,
+    onNavigate: (String) -> Unit,
 ) {
-    Column(
+    Surface(
         modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 12.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 12.dp),
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+        tonalElevation = 6.dp,
     ) {
-        Text(
-            text = "Wallpapers",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-        )
-
         Row(
-            modifier = Modifier.horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
-            listOf(
-                "Color" to filters.selectedColors.isNotEmpty(),
-                "Size" to filters.selectedSizes.isNotEmpty(),
-                "Source" to filters.selectedSources.isNotEmpty(),
-            ).forEach { (category, selected) ->
-                FilterChip(
+            BottomNavItem.entries.forEach { item ->
+                val selected = currentRoute == item.route
+                NavigationBarItem(
                     selected = selected,
-                    onClick = { onOpenFilter(category) },
-                    label = { Text(category) },
+                    onClick = { onNavigate(item.route) },
+                    icon = { Icon(imageVector = item.icon, contentDescription = item.title) },
+                    label = { Text(item.title) },
+                    alwaysShowLabel = false,
                 )
             }
         }
+    }
+}
 
-        if (wallpapers.isEmpty()) {
+@Composable
+private fun HomeScreen(
+    wallpapers: List<Wallpaper>,
+    filters: WallpaperFilters,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    onOpenFilter: (String) -> Unit,
+    onUpdateFilters: (WallpaperFilters) -> Unit,
+    onWallpaperClick: (Wallpaper) -> Unit,
+    onApplyWallpaper: (Wallpaper) -> Unit,
+) {
+    val heroWallpapers = wallpapers.take(4)
+
+    LazyVerticalStaggeredGrid(
+        columns = StaggeredGridCells.Adaptive(minSize = 180.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 96.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalItemSpacing = 12.dp,
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        item(span = StaggeredGridItemSpan.FullLine) {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(
+                    text = "Find your next wallpaper.",
+                    style = MaterialTheme.typography.displaySmall,
+                    fontWeight = FontWeight.Bold,
+                )
+
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = onSearchQueryChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    placeholder = { Text("Search wallpapers") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { onSearchQueryChange(searchQuery) }),
+                )
+
+                Text(
+                    text = "Featured",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(heroWallpapers) { wallpaper ->
+                        FeaturedWallpaperCard(
+                            wallpaper = wallpaper,
+                            onClick = { onWallpaperClick(wallpaper) },
+                            onApply = { onApplyWallpaper(wallpaper) },
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    listOf(
+                        "Color" to filters.selectedColors.isNotEmpty(),
+                        "Size" to filters.selectedSizes.isNotEmpty(),
+                        "Source" to filters.selectedSources.isNotEmpty(),
+                    ).forEach { (category, selected) ->
+                        FilterChip(
+                            selected = selected,
+                            onClick = { onOpenFilter(category) },
+                            label = { Text(category) },
+                        )
+                    }
+                }
+            }
+        }
+
+        item(span = StaggeredGridItemSpan.FullLine) {
             Text(
-                text = "No wallpapers match these filters.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.75f),
+                text = "For you",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 8.dp),
             )
-        } else {
-            LazyVerticalStaggeredGrid(
-                columns = StaggeredGridCells.Adaptive(minSize = 180.dp),
-                contentPadding = PaddingValues(bottom = 80.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalItemSpacing = 10.dp,
-                modifier = Modifier.fillMaxSize(),
+        }
+
+        items(wallpapers, key = { it.id }) { wallpaper ->
+            WallpaperThumbnailCard(
+                wallpaper = wallpaper,
+                onClick = { onWallpaperClick(wallpaper) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun WallpaperThumbnailCard(
+    wallpaper: Wallpaper,
+    onClick: () -> Unit,
+) {
+    Card(
+        onClick = onClick,
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Column {
+            AsyncImage(
+                model = wallpaper.thumbnailUrl,
+                contentDescription = wallpaper.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(220.dp),
+            )
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                items(wallpapers, key = { it.id }) { wallpaper ->
-                    WallpaperThumbnailCard(
-                        wallpaper = wallpaper,
-                        onClick = { onWallpaperClick(wallpaper) },
+                Text(
+                    text = wallpaper.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = wallpaper.sourceName,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FeaturedWallpaperCard(
+    wallpaper: Wallpaper,
+    onClick: () -> Unit,
+    onApply: () -> Unit,
+) {
+    Card(
+        onClick = onClick,
+        shape = RoundedCornerShape(28.dp),
+        modifier = Modifier
+            .width(260.dp)
+            .height(360.dp),
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            AsyncImage(
+                model = wallpaper.thumbnailUrl,
+                contentDescription = wallpaper.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.18f)),
+            )
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    text = wallpaper.title,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = wallpaper.sourceName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.85f),
+                )
+            }
+            Button(
+                onClick = onApply,
+                shape = CircleShape,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(12.dp),
+            ) {
+                Text("Apply")
+            }
+        }
+    }
+}
+
+@Composable
+private fun DiscoverScreen(
+    wallpapers: List<Wallpaper>,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    onWallpaperClick: (Wallpaper) -> Unit,
+    onApplyWallpaper: (Wallpaper) -> Unit,
+) {
+    LazyColumn(
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item {
+            Text(
+                text = "Discover",
+                style = MaterialTheme.typography.displaySmall,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        item {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = onSearchQueryChange,
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                placeholder = { Text("Search available sources") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { onSearchQueryChange(searchQuery) }),
+            )
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("Trending", "Abstract", "Nature", "Dark").forEach { tag ->
+                    FilterChip(selected = tag == "Trending", onClick = {}, label = { Text(tag) })
+                }
+            }
+        }
+        items(wallpapers.take(6)) { wallpaper ->
+            WallpaperListRow(
+                wallpaper = wallpaper,
+                onClick = { onWallpaperClick(wallpaper) },
+                onApply = { onApplyWallpaper(wallpaper) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SavedScreen(
+    items: List<SavedItemEntity>,
+    activeFilter: SaveKind?,
+    onFilterSelected: (SaveKind?) -> Unit,
+    onWallpaperClick: (SavedItemEntity) -> Unit,
+) {
+    LazyColumn(
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item {
+            Text(
+                text = "Your collection",
+                style = MaterialTheme.typography.displaySmall,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(null, SaveKind.WALLPAPER, SaveKind.LOCKSCREEN, SaveKind.SET).forEach { kind ->
+                    val label = when (kind) {
+                        null -> "All"
+                        SaveKind.WALLPAPER -> "Home"
+                        SaveKind.LOCKSCREEN -> "Lock"
+                        SaveKind.SET -> "Both"
+                    }
+                    FilterChip(
+                        selected = activeFilter == kind,
+                        onClick = { onFilterSelected(kind) },
+                        label = { Text(label) },
                     )
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun SavedFeed(
-    items: List<SavedItemEntity>,
-    activeFilter: SaveKind?,
-    onFilterSelected: (SaveKind?) -> Unit,
-    onItemClick: (SavedItemEntity) -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 12.dp, vertical = 12.dp),
-    ) {
-        Text(
-            text = "Saved",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 12.dp),
-        )
-
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(bottom = 12.dp),
-        ) {
-            listOf(null, SaveKind.WALLPAPER, SaveKind.LOCKSCREEN, SaveKind.SET).forEach { kind ->
-                val label = when (kind) {
-                    null -> "All"
-                    SaveKind.WALLPAPER -> "Wallpapers"
-                    SaveKind.LOCKSCREEN -> "Lock Screens"
-                    SaveKind.SET -> "Sets"
-                }
-                TextButton(
-                    onClick = { onFilterSelected(kind) },
-                    modifier = Modifier.background(
-                        if (activeFilter == kind) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surface,
-                        RoundedCornerShape(50),
-                    ),
+        if (items.isEmpty()) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(28.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                 ) {
-                    Text(label)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text("Nothing saved yet", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text("Find something you love and keep it here.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
-        }
-
-        LazyColumn(
-            contentPadding = PaddingValues(bottom = 80.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxSize(),
-        ) {
+        } else {
             items(items, key = { it.wallpaperId }) { item ->
-                SavedItemRow(
-                    item = item,
-                    onClick = { onItemClick(item) },
+                WallpaperListRow(
+                    wallpaper = item.toWallpaper(),
+                    onClick = { onWallpaperClick(item) },
+                    onApply = {},
                 )
             }
         }
@@ -354,56 +615,298 @@ private fun SavedFeed(
 }
 
 @Composable
-private fun FloatingTabBar(
-    selectedPage: Int,
-    onTabSelected: (Int) -> Unit,
-    modifier: Modifier = Modifier,
+private fun SettingsScreen(
+    hapticsEnabled: Boolean,
+    dynamicColorsEnabled: Boolean,
+    sourceStatuses: List<SourceStatus>,
+    onHapticsChanged: (Boolean) -> Unit,
+    onDynamicColorsChanged: (Boolean) -> Unit,
+    onSourceToggled: (String, Boolean) -> Unit,
 ) {
-    Surface(
-        modifier = modifier,
-        tonalElevation = 4.dp,
-        shadowElevation = 8.dp,
-        shape = RoundedCornerShape(50),
-        color = MaterialTheme.colorScheme.surface,
+    var showSourceReviewDialog by remember { mutableStateOf(false) }
+
+    LazyColumn(
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item {
+            Text(
+                text = "Make it yours",
+                style = MaterialTheme.typography.displaySmall,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        item {
+            SettingToggleRow(
+                title = "Haptic feedback",
+                subtitle = "Subtle touch responses",
+                checked = hapticsEnabled,
+                onCheckedChange = onHapticsChanged,
+            )
+        }
+        item {
+            SettingToggleRow(
+                title = "Dynamic colors",
+                subtitle = "Wallpaper-derived palette",
+                checked = dynamicColorsEnabled,
+                onCheckedChange = onDynamicColorsChanged,
+            )
+        }
+        item {
+            SettingCard(
+                title = "Extensions",
+                subtitle = "${sourceStatuses.size} sources available",
+                iconColor = MaterialTheme.colorScheme.primary,
+                onClick = { showSourceReviewDialog = true },
+            )
+        }
+        item {
+            SettingCard(
+                title = "Storage",
+                subtitle = "Current cache: 0 MB",
+                iconColor = MaterialTheme.colorScheme.secondary,
+                onClick = {},
+            )
+        }
+    }
+
+    if (showSourceReviewDialog) {
+        SourceReviewDialog(
+            sourceStatuses = sourceStatuses,
+            onDismiss = { showSourceReviewDialog = false },
+            onToggleSource = onSourceToggled,
+        )
+    }
+}
+
+@Composable
+private fun WallpaperListRow(
+    wallpaper: Wallpaper,
+    onClick: () -> Unit,
+    onApply: () -> Unit,
+) {
+    Card(
+        onClick = onClick,
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(
-                onClick = { onTabSelected(0) },
-                modifier = Modifier.background(
-                    if (selectedPage == 0) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface,
-                    RoundedCornerShape(50),
-                ),
-            ) {
-                Text("Home")
+            AsyncImage(
+                model = wallpaper.thumbnailUrl,
+                contentDescription = wallpaper.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(88.dp)
+                    .clip(RoundedCornerShape(18.dp)),
+            )
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(wallpaper.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(wallpaper.sourceName, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    text = wallpaper.width?.let { w -> "$w×${wallpaper.height ?: 0}" } ?: "Resolution unknown",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            TextButton(
-                onClick = { onTabSelected(1) },
-                modifier = Modifier.background(
-                    if (selectedPage == 1) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface,
-                    RoundedCornerShape(50),
-                ),
+            Button(onClick = onApply, shape = CircleShape) { Text("Apply") }
+        }
+    }
+}
+
+@Composable
+private fun WallpaperDetailScreen(
+    wallpaper: Wallpaper,
+    onBack: () -> Unit,
+    onApply: (SaveKind) -> Unit,
+    onSave: (SaveKind) -> Unit,
+) {
+    val haptic = LocalHapticFeedback.current
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+    ) {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            AsyncImage(
+                model = wallpaper.fullResUrl,
+                contentDescription = wallpaper.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(440.dp),
+            )
+            IconButton(
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onBack()
+                },
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(16.dp),
             ) {
-                Text("♥")
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(wallpaper.title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(wallpaper.sourceName, style = MaterialTheme.typography.bodyMedium)
+                wallpaper.width?.let { w ->
+                    Text("${w}×${wallpaper.height}", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+            wallpaper.artist?.let {
+                Text("by $it", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { onApply(SaveKind.WALLPAPER) }, shape = CircleShape) { Text("Apply") }
+                OutlinedButton(onClick = { onSave(SaveKind.WALLPAPER) }, shape = CircleShape) { Text("Save") }
+            }
+            if (!wallpaper.attributionText.isNullOrBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(18.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Attribution", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(wallpaper.attributionText ?: "", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
             }
         }
     }
+}
+
+@Composable
+private fun SettingToggleRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(checked = checked, onCheckedChange = onCheckedChange)
+        }
+    }
+}
+
+@Composable
+private fun SettingCard(
+    title: String,
+    subtitle: String,
+    iconColor: Color,
+    onClick: () -> Unit = {},
+) {
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.clickable(onClick = onClick),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .background(iconColor, RoundedCornerShape(10.dp)),
+            )
+            Spacer(Modifier.size(12.dp))
+            Column {
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SourceReviewDialog(
+    sourceStatuses: List<SourceStatus>,
+    onDismiss: () -> Unit,
+    onToggleSource: (String, Boolean) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Sources") },
+        text = {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(sourceStatuses, key = { it.id }) { source ->
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(source.displayName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    text = "${source.type} • ${if (source.isOfficialApi) "official API" else "scraped"}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Switch(
+                                checked = source.isEnabled,
+                                onCheckedChange = { enabled -> onToggleSource(source.id, enabled) },
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Done") }
+        },
+    )
 }
 
 @Composable
 private fun FilterPickerDialog(
     category: String,
     filters: WallpaperFilters,
+    sourceStatuses: List<SourceStatus>,
     onDismiss: () -> Unit,
     onUpdated: (WallpaperFilters) -> Unit,
 ) {
     val options = when (category) {
         "Color" -> listOf("blue", "teal", "red", "green", "orange")
         "Size" -> listOf("HD", "QHD", "4K+")
-        "Source" -> listOf("demo", "wallhaven", "unsplash")
+        "Source" -> sourceStatuses.map { it.id }
         else -> emptyList()
     }
 
@@ -418,12 +921,12 @@ private fun FilterPickerDialog(
         onDismissRequest = onDismiss,
         title = { Text(category) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 options.forEach { option ->
                     FilterChip(
                         selected = option in selectedValues,
                         onClick = {
-                            val next: Set<String> = when (category) {
+                            val next = when (category) {
                                 "Color" -> filters.selectedColors.toMutableSet().apply {
                                     if (contains(option)) remove(option) else add(option)
                                 }.toSet()
@@ -435,7 +938,6 @@ private fun FilterPickerDialog(
                                 }.toSet()
                                 else -> emptySet()
                             }
-
                             onUpdated(
                                 when (category) {
                                     "Color" -> filters.copy(selectedColors = next)
@@ -454,270 +956,6 @@ private fun FilterPickerDialog(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SettingsSheet(onDismiss: () -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onDismiss) { Text("←") }
-                Text(
-                    text = "Settings",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(start = 4.dp),
-                )
-            }
-
-            SettingCard(title = "Sources", subtitle = "Demo, Wallhaven, Unsplash", iconColor = MaterialTheme.colorScheme.primary)
-            SettingCard(title = "Appearance", subtitle = "System default", iconColor = MaterialTheme.colorScheme.secondary)
-            SettingCard(title = "Content Filters", subtitle = "SFW-only by default", iconColor = MaterialTheme.colorScheme.tertiary)
-            SettingCard(title = "Storage", subtitle = "Current cache: 0 MB • Clear cache", iconColor = MaterialTheme.colorScheme.error)
-        }
-    }
-}
-
-@Composable
-private fun SettingCard(title: String, subtitle: String, iconColor: Color) {
-    Surface(
-        shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .background(iconColor, RoundedCornerShape(10.dp)),
-            )
-            Spacer(modifier = Modifier.size(12.dp))
-            Column {
-                Text(text = title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Text(text = subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-            }
-        }
-    }
-}
-
-@Composable
-private fun KindBadge(kind: SaveKind) {
-    Surface(
-        shape = RoundedCornerShape(50),
-        color = when (kind) {
-            SaveKind.WALLPAPER -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-            SaveKind.LOCKSCREEN -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f)
-            SaveKind.SET -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f)
-        },
-    ) {
-        Text(
-            text = when (kind) {
-                SaveKind.WALLPAPER -> "Wallpaper"
-                SaveKind.LOCKSCREEN -> "Lock"
-                SaveKind.SET -> "Set"
-            },
-            style = MaterialTheme.typography.labelSmall,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-        )
-    }
-}
-
-@Composable
-private fun WallpaperThumbnailCard(
-    wallpaper: Wallpaper,
-    onClick: () -> Unit,
-) {
-    val cardHeight = (220f / wallpaper.aspectRatio).coerceIn(140f, 320f)
-    Card(
-        modifier = Modifier.clickable(onClick = onClick),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-    ) {
-        AsyncImage(
-            model = wallpaper.thumbnailUrl,
-            contentDescription = wallpaper.title,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(cardHeight.dp)
-                .clip(RoundedCornerShape(18.dp)),
-        )
-    }
-}
-
-@Composable
-private fun SavedItemRow(
-    item: SavedItemEntity,
-    onClick: () -> Unit,
-) {
-    Card(
-        modifier = Modifier.clickable(onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            AsyncImage(
-                model = item.thumbnailUrl,
-                contentDescription = item.wallpaperId,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .size(72.dp)
-                    .clip(RoundedCornerShape(12.dp)),
-            )
-            Column(modifier = Modifier.weight(1f)) {
-                KindBadge(item.kind)
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = item.sourceId,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    text = item.artist ?: "Unknown artist",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun WallpaperActionSheet(
-    wallpaper: Wallpaper,
-    onApply: () -> Unit,
-    onSave: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        AsyncImage(
-            model = wallpaper.thumbnailUrl,
-            contentDescription = wallpaper.title,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(420.dp)
-                .clip(RoundedCornerShape(20.dp)),
-        )
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            KindBadge(SaveKind.WALLPAPER)
-            wallpaper.aspectRatioLabel()?.let { KindBadge(SaveKind.SET) }
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(
-                text = wallpaper.width?.let { w -> wallpaper.height?.let { h -> "$w×$h" } } ?: "Unknown size",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Text(
-                text = wallpaper.sourceId,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            wallpaper.artist?.let {
-                Text(
-                    text = it,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-            wallpaper.aspectRatioLabel()?.let {
-                Text(
-                    text = it,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-        }
-
-        Button(
-            onClick = onApply,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Apply Set")
-        }
-
-        OutlinedButton(
-            onClick = onSave,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Save Set")
-        }
-    }
-}
-
-@Composable
-private fun ApplyChoiceDialog(
-    wallpaper: Wallpaper,
-    onDismiss: () -> Unit,
-    onApply: (SaveKind) -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Apply wallpaper") },
-        text = { Text("Choose where to set this image.") },
-        confirmButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { onApply(SaveKind.WALLPAPER) }) { Text("Home") }
-                TextButton(onClick = { onApply(SaveKind.LOCKSCREEN) }) { Text("Lock") }
-                TextButton(onClick = { onApply(SaveKind.SET) }) { Text("Both") }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        },
-    )
-}
-
-@Composable
-private fun SaveChoiceDialog(
-    wallpaper: Wallpaper,
-    onDismiss: () -> Unit,
-    onSave: (SaveKind) -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Save wallpaper") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Wallpaper")
-                Text("Lock Screen")
-                Text("Both (Set)")
-            }
-        },
-        confirmButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { onSave(SaveKind.WALLPAPER) }) { Text("Wallpaper") }
-                TextButton(onClick = { onSave(SaveKind.LOCKSCREEN) }) { Text("Lock Screen") }
-                TextButton(onClick = { onSave(SaveKind.SET) }) { Text("Both (Set)") }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        },
-    )
-}
-
 private fun SavedItemEntity.toWallpaper(): Wallpaper = Wallpaper(
     id = wallpaperId,
     sourceId = sourceId,
@@ -726,6 +964,8 @@ private fun SavedItemEntity.toWallpaper(): Wallpaper = Wallpaper(
     width = width,
     height = height,
     artist = artist,
+    attributionText = null,
+    attributionUrl = null,
 )
 
 private fun applyWallpaperFilters(wallpapers: List<Wallpaper>, filters: WallpaperFilters): List<Wallpaper> {
