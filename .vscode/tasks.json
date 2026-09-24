@@ -1,0 +1,92 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run app tests",
+			"type": "shell",
+			"command": "gradlew.bat :app:testDebugUnitTest --console=plain",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Run app tests",
+			"type": "shell",
+			"command": "./gradlew.bat :app:testDebugUnitTest --console=plain",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Run app tests",
+			"type": "shell",
+			"command": "C:\\Users\\Kasumi\\Desktop\\wallpaper\\Wallpaperapp\\gradlew.bat :app:testDebugUnitTest --console=plain",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Run app tests",
+			"type": "shell",
+			"command": "cmd /d /c \"cd /d \"C:\\Users\\Kasumi\\Desktop\\wallpaper\\Wallpaperapp\" && gradlew.bat :app:testDebugUnitTest --console=plain\"",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Verify unit tests via PowerShell",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Set-Location 'C:\\Users\\Kasumi\\Desktop\\wallpaper\\Wallpaperapp'; & .\\gradlew.bat :app:testDebugUnitTest --console=plain"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Check Pixel 10 device",
+			"type": "shell",
+			"command": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$adb = Join-Path $env:LOCALAPPDATA 'Android\\Sdk\\platform-tools\\adb.exe'; if (Test-Path $adb) { & $adb devices } else { Write-Output 'ADB_NOT_FOUND' }\"",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Find Android SDK ADB",
+			"type": "shell",
+			"command": "cmd /d /c \"echo %LOCALAPPDATA% && dir \"%LOCALAPPDATA%\\Android\\Sdk\\platform-tools\"\"",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Find Android SDK ADB",
+			"type": "shell",
+			"command": "Get-ChildItem \"$env:LOCALAPPDATA\\Android\\Sdk\\platform-tools\" | Select-Object Name",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Check Pixel 10 device",
+			"type": "shell",
+			"command": "powershell -NoProfile -ExecutionPolicy Bypass -Command 'Set-Location \"C:\\Users\\Kasumi\\Desktop\\wallpaper\\Wallpaperapp\"; & \"C:\\Users\\Kasumi\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe\" devices'",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		}
+	]
+}

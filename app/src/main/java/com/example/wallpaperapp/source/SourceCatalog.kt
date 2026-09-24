@@ -45,8 +45,20 @@ data class SourceStatus(
     val type: String,
 )
 
+data class PaintingsFilterSelection(
+    val centuryCategory: String? = null,
+    val movementCategory: String? = null,
+    val artistCategory: String? = null,
+)
+
+data class PaintingsPage(
+    val wallpapers: List<Wallpaper>,
+    val hasMore: Boolean,
+)
+
 @Singleton
 class SourceCatalog @Inject constructor() {
+    private val wikimediaSource = WikimediaApiSource()
     private var extensionSources: List<WallpaperSource> = emptyList()
     private val sourceEnabledState = linkedMapOf<String, Boolean>()
 
@@ -121,10 +133,17 @@ class SourceCatalog @Inject constructor() {
     suspend fun abstractFeed(page: Int = 1, limit: Int = 50): List<Wallpaper> =
         searchEnabledSources(query = "abstract", page = page, limit = limit)
 
+    suspend fun paintingsFeed(
+        filters: PaintingsFilterSelection,
+        page: Int,
+        pageSize: Int = 50,
+        randomize: Boolean = false,
+    ): PaintingsPage = wikimediaSource.fetchPaintings(filters, page, pageSize, randomize)
+
     private fun builtInSources(): List<WallpaperSource> = listOf(
         DemoWallpaperSource(),
         WallhavenDemoSource(),
-        WikimediaApiSource(),
+        wikimediaSource,
     )
 
     class DemoWallpaperSource : ApiWallpaperSource() {
@@ -160,6 +179,112 @@ class SourceCatalog @Inject constructor() {
         override suspend fun getPopular(page: Int): List<Wallpaper> = fetchWikimedia(query = "abstract", page = page)
 
         override suspend fun search(query: String, page: Int): List<Wallpaper> = fetchWikimedia(query = query, page = page)
+
+        suspend fun fetchPaintings(
+            filters: PaintingsFilterSelection,
+            page: Int,
+            pageSize: Int = 50,
+            randomize: Boolean = false,
+        ): PaintingsPage {
+            val safePage = page.coerceAtLeast(1)
+            val offset = (safePage - 1) * pageSize
+            val srsearch = buildPaintingsSearch(filters)
+            val encodedSearch = URLEncoder.encode(srsearch, "UTF-8")
+            val sort = if (randomize) "random" else "relevance"
+            val url = "https://commons.wikimedia.org/w/api.php" +
+                "?action=query&generator=search&gsrsearch=$encodedSearch" +
+                "&gsrnamespace=6&gsrlimit=$pageSize&gsroffset=$offset" +
+                "&gsrsort=$sort" +
+                "&prop=imageinfo&iiprop=url|size|mime|extmetadata" +
+                "&iiurlwidth=800&iiextmetadatalanguage=en" +
+                "&format=json&origin=*"
+
+            return runCatching {
+                val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 10_000
+                    readTimeout = 10_000
+                    instanceFollowRedirects = true
+                    setRequestProperty(
+                        "User-Agent",
+                        "WallpaperApp/1.0 (https://github.com/Aho-Janai/Wallpaperapp)"
+                    )
+                }
+
+                val responseCode = connection.responseCode
+                if (responseCode !in 200..299) {
+                    val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() }
+                    connection.disconnect()
+                    error("Wikimedia API returned HTTP $responseCode: ${errorBody?.take(300)}")
+                }
+
+                val body = connection.inputStream.bufferedReader().use { it.readText() }
+                connection.disconnect()
+                parsePaintingsResponse(body)
+            }.onFailure { e ->
+                Log.e("WikimediaApiSource", "fetchPaintings failed (page=$page, filters=$filters)", e)
+            }.getOrDefault(PaintingsPage(emptyList(), hasMore = false))
+        }
+
+        private fun buildPaintingsSearch(filters: PaintingsFilterSelection): String {
+            val clauses = mutableListOf("incategory:\"Paintings\"")
+            filters.centuryCategory?.let { clauses += "incategory:\"$it\"" }
+            filters.movementCategory?.let { clauses += "incategory:\"$it\"" }
+            filters.artistCategory?.let { clauses += "incategory:\"$it\"" }
+            return clauses.joinToString(" ")
+        }
+
+        private fun parsePaintingsResponse(json: String): PaintingsPage {
+            val root = JSONObject(json)
+            val query = root.optJSONObject("query") ?: return PaintingsPage(emptyList(), hasMore = false)
+            val pages = query.optJSONObject("pages") ?: return PaintingsPage(emptyList(), hasMore = false)
+            val keys = pages.names() ?: return PaintingsPage(emptyList(), hasMore = false)
+
+            val wallpapers = (0 until keys.length()).mapNotNull { index ->
+                val key = keys.getString(index)
+                val page = pages.optJSONObject(key) ?: return@mapNotNull null
+                val infos = page.optJSONArray("imageinfo") ?: return@mapNotNull null
+                val info = infos.optJSONObject(0) ?: return@mapNotNull null
+                val mime = info.optString("mime")
+                if (!mime.startsWith("image/")) return@mapNotNull null
+
+                val thumb = info.optString("thumburl", "").ifBlank { info.optString("url", "") }
+                val full = info.optString("url", "").ifBlank { thumb }
+                if (full.isBlank()) return@mapNotNull null
+
+                val artistRaw = info.optJSONObject("extmetadata")
+                    ?.optJSONObject("Artist")
+                    ?.optString("value")
+                val artist = artistRaw
+                    ?.replace(Regex("(?s)<[^>]*>"), " ")
+                    ?.replace(Regex("\\s+"), " ")
+                    ?.trim()
+                    ?.takeIf { it.isNotBlank() }
+
+                val title = page.optString("title", "").removePrefix("File:").trim()
+                val descriptionUrl = info.optString("descriptionurl", "")
+
+                Wallpaper(
+                    id = "wikimedia-${page.optLong("pageid", 0L)}",
+                    sourceId = WIKIMEDIA_SOURCE_ID,
+                    thumbnailUrl = thumb,
+                    fullResUrl = full,
+                    width = info.optInt("width", 0).takeIf { it > 0 },
+                    height = info.optInt("height", 0).takeIf { it > 0 },
+                    tags = listOfNotNull(
+                        title.ifBlank { "Wikimedia painting" },
+                        "wikimedia",
+                        "painting",
+                    ),
+                    artist = artist,
+                    attributionText = artist ?: "Wikimedia Commons",
+                    attributionUrl = descriptionUrl.ifBlank { null },
+                )
+            }
+
+            val hasMore = root.has("continue")
+            return PaintingsPage(wallpapers, hasMore)
+        }
 
         private suspend fun fetchWikimedia(query: String, page: Int): List<Wallpaper> {
             val encoded = URLEncoder.encode(query.ifBlank { "abstract" }, "UTF-8")

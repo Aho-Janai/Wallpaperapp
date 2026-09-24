@@ -52,13 +52,17 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -83,6 +87,8 @@ import com.example.wallpaperapp.WallpaperViewModel
 import com.example.wallpaperapp.data.SaveKind
 import com.example.wallpaperapp.data.SavedItemEntity
 import com.example.wallpaperapp.data.Wallpaper
+import com.example.wallpaperapp.source.PaintingsFilterOptions
+import com.example.wallpaperapp.source.PaintingsFilterSelection
 import com.example.wallpaperapp.source.SourceStatus
 import kotlinx.coroutines.launch
 
@@ -117,6 +123,8 @@ fun WallpaperAppScreen(
     val dynamicColorsEnabled by viewModel.dynamicColorsEnabled.collectAsStateWithLifecycle()
     val sourceStatuses by viewModel.sourceStatuses.collectAsStateWithLifecycle()
     val searchResults by viewModel.searchResults.collectAsStateWithLifecycle()
+    val paintingsFilters by viewModel.paintingsFilters.collectAsStateWithLifecycle()
+    val isRefreshingPaintings by viewModel.isRefreshingPaintings.collectAsStateWithLifecycle()
     val navController = rememberNavController()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -166,7 +174,9 @@ fun WallpaperAppScreen(
                 HomeScreen(
                     wallpapers = activeFeed,
                     filters = filters,
+                    paintingsFilters = paintingsFilters,
                     searchQuery = searchQuery,
+                    isRefreshingPaintings = isRefreshingPaintings,
                     onSearchQueryChange = { query ->
                         searchQuery = query
                         if (query.isBlank()) {
@@ -180,6 +190,7 @@ fun WallpaperAppScreen(
                         filterCategory = category
                     },
                     onUpdateFilters = { filters = it },
+                    onUpdatePaintingsFilters = { viewModel.updatePaintingsFilters(it) },
                     onWallpaperClick = { wallpaper ->
                         if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         navController.navigate("detail/${wallpaper.id}")
@@ -191,6 +202,8 @@ fun WallpaperAppScreen(
                             else snackbarHostState.showSnackbar("Wallpaper could not be applied")
                         }
                     },
+                    onLoadMore = viewModel::loadMorePaintings,
+                    onRefresh = viewModel::pullToRefreshPaintings,
                 )
             }
 
@@ -270,16 +283,28 @@ fun WallpaperAppScreen(
     }
 
     filterCategory?.let { category ->
-        FilterPickerDialog(
-            category = category,
-            filters = filters,
-            sourceStatuses = sourceStatuses,
-            onDismiss = { filterCategory = null },
-            onUpdated = {
-                filters = it
-                filterCategory = null
-            },
-        )
+        if (category in listOf("Century", "Movement", "Artist")) {
+            PaintingsFilterPickerDialog(
+                category = category,
+                paintingsFilters = paintingsFilters,
+                onDismiss = { filterCategory = null },
+                onUpdated = {
+                    viewModel.updatePaintingsFilters(it)
+                    filterCategory = null
+                },
+            )
+        } else {
+            FilterPickerDialog(
+                category = category,
+                filters = filters,
+                sourceStatuses = sourceStatuses,
+                onDismiss = { filterCategory = null },
+                onUpdated = {
+                    filters = it
+                    filterCategory = null
+                },
+            )
+        }
     }
 }
 
@@ -317,93 +342,121 @@ private fun FloatingNavBar(
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 private fun HomeScreen(
     wallpapers: List<Wallpaper>,
     filters: WallpaperFilters,
+    paintingsFilters: PaintingsFilterSelection,
     searchQuery: String,
+    isRefreshingPaintings: Boolean,
     onSearchQueryChange: (String) -> Unit,
     onOpenFilter: (String) -> Unit,
     onUpdateFilters: (WallpaperFilters) -> Unit,
+    onUpdatePaintingsFilters: (PaintingsFilterSelection) -> Unit,
     onWallpaperClick: (Wallpaper) -> Unit,
     onApplyWallpaper: (Wallpaper) -> Unit,
+    onLoadMore: () -> Unit,
+    onRefresh: () -> Unit,
 ) {
     val heroWallpapers = wallpapers.take(4)
+    val gridState = rememberLazyStaggeredGridState()
 
-    LazyVerticalStaggeredGrid(
-        columns = StaggeredGridCells.Adaptive(minSize = 180.dp),
-        contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 96.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalItemSpacing = 12.dp,
+    LaunchedEffect(gridState, wallpapers.size) {
+        snapshotFlow {
+            gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index
+        }.collect { lastVisibleIndex ->
+            if (lastVisibleIndex != null && lastVisibleIndex >= wallpapers.size - 10) {
+                onLoadMore()
+            }
+        }
+    }
+
+    PullToRefreshBox(
+        isRefreshing = isRefreshingPaintings,
+        onRefresh = onRefresh,
         modifier = Modifier.fillMaxSize(),
     ) {
-        item(span = StaggeredGridItemSpan.FullLine) {
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(
-                    text = "Find your next wallpaper.",
-                    style = MaterialTheme.typography.displaySmall,
-                    fontWeight = FontWeight.Bold,
-                )
+        LazyVerticalStaggeredGrid(
+            state = gridState,
+            columns = StaggeredGridCells.Adaptive(minSize = 180.dp),
+            contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 96.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalItemSpacing = 12.dp,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            item(span = StaggeredGridItemSpan.FullLine) {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text(
+                        text = "Find your next wallpaper.",
+                        style = MaterialTheme.typography.displaySmall,
+                        fontWeight = FontWeight.Bold,
+                    )
 
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = onSearchQueryChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    placeholder = { Text("Search wallpapers") },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { onSearchQueryChange(searchQuery) }),
-                )
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = onSearchQueryChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        placeholder = { Text("Search wallpapers") },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { onSearchQueryChange(searchQuery) }),
+                    )
 
-                Text(
-                    text = "Featured",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
-                )
+                    Text(
+                        text = "Featured",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
 
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(heroWallpapers) { wallpaper ->
-                        FeaturedWallpaperCard(
-                            wallpaper = wallpaper,
-                            onClick = { onWallpaperClick(wallpaper) },
-                            onApply = { onApplyWallpaper(wallpaper) },
-                        )
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(heroWallpapers) { wallpaper ->
+                            FeaturedWallpaperCard(
+                                wallpaper = wallpaper,
+                                onClick = { onWallpaperClick(wallpaper) },
+                                onApply = { onApplyWallpaper(wallpaper) },
+                            )
+                        }
                     }
-                }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    listOf(
-                        "Color" to filters.selectedColors.isNotEmpty(),
-                        "Size" to filters.selectedSizes.isNotEmpty(),
-                        "Source" to filters.selectedSources.isNotEmpty(),
-                    ).forEach { (category, selected) ->
-                        FilterChip(
-                            selected = selected,
-                            onClick = { onOpenFilter(category) },
-                            label = { Text(category) },
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        val filterEntries = listOf(
+                            "Color" to filters.selectedColors.isNotEmpty(),
+                            "Size" to filters.selectedSizes.isNotEmpty(),
+                            "Source" to filters.selectedSources.isNotEmpty(),
+                            "Century" to (paintingsFilters.centuryCategory != null),
+                            "Movement" to (paintingsFilters.movementCategory != null),
+                            "Artist" to (paintingsFilters.artistCategory != null),
                         )
+                        filterEntries.forEach { (category, selected) ->
+                            FilterChip(
+                                selected = selected,
+                                onClick = { onOpenFilter(category) },
+                                label = { Text(category) },
+                            )
+                        }
                     }
                 }
             }
-        }
 
-        item(span = StaggeredGridItemSpan.FullLine) {
-            Text(
-                text = "For you",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-        }
+            item(span = StaggeredGridItemSpan.FullLine) {
+                Text(
+                    text = "For you",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
 
-        items(wallpapers, key = { it.id }) { wallpaper ->
-            WallpaperThumbnailCard(
-                wallpaper = wallpaper,
-                onClick = { onWallpaperClick(wallpaper) },
-            )
+            items(wallpapers, key = { it.id }) { wallpaper ->
+                WallpaperThumbnailCard(
+                    wallpaper = wallpaper,
+                    onClick = { onWallpaperClick(wallpaper) },
+                )
+            }
         }
     }
 }
@@ -892,6 +945,58 @@ private fun SourceReviewDialog(
         confirmButton = {
             TextButton(onClick = onDismiss) { Text("Done") }
         },
+    )
+}
+
+@Composable
+private fun PaintingsFilterPickerDialog(
+    category: String,
+    paintingsFilters: PaintingsFilterSelection,
+    onDismiss: () -> Unit,
+    onUpdated: (PaintingsFilterSelection) -> Unit,
+) {
+    val options = when (category) {
+        "Century" -> PaintingsFilterOptions.centuries
+        "Movement" -> PaintingsFilterOptions.movements
+        "Artist" -> PaintingsFilterOptions.artists
+        else -> emptyList()
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(category) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                options.forEach { (label, value) ->
+                    val selected = when (category) {
+                        "Century" -> paintingsFilters.centuryCategory == value
+                        "Movement" -> paintingsFilters.movementCategory == value
+                        "Artist" -> paintingsFilters.artistCategory == value
+                        else -> false
+                    }
+                    FilterChip(
+                        selected = selected,
+                        onClick = {
+                            val next = when (category) {
+                                "Century" -> paintingsFilters.copy(
+                                    centuryCategory = if (selected) null else value,
+                                )
+                                "Movement" -> paintingsFilters.copy(
+                                    movementCategory = if (selected) null else value,
+                                )
+                                "Artist" -> paintingsFilters.copy(
+                                    artistCategory = if (selected) null else value,
+                                )
+                                else -> paintingsFilters
+                            }
+                            onUpdated(next)
+                        },
+                        label = { Text(label) },
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
     )
 }
 

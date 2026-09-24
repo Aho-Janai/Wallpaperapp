@@ -12,6 +12,7 @@ import com.example.wallpaperapp.data.SavedItemEntity
 import com.example.wallpaperapp.data.SettingsStore
 import com.example.wallpaperapp.data.Wallpaper
 import com.example.wallpaperapp.data.WallpaperRepository
+import com.example.wallpaperapp.source.PaintingsFilterSelection
 import com.example.wallpaperapp.source.SourceCatalog
 import com.example.wallpaperapp.source.SourceStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -48,6 +49,18 @@ class WallpaperViewModel @Inject constructor(
     private val _sourceStatuses = MutableStateFlow<List<SourceStatus>>(emptyList())
     val sourceStatuses: StateFlow<List<SourceStatus>> = _sourceStatuses.asStateFlow()
 
+    private val _paintingsFilters = MutableStateFlow(PaintingsFilterSelection())
+    val paintingsFilters: StateFlow<PaintingsFilterSelection> = _paintingsFilters.asStateFlow()
+
+    private var paintingsPage = 1
+    private var paintingsHasMore = true
+
+    private val _isRefreshingPaintings = MutableStateFlow(false)
+    val isRefreshingPaintings: StateFlow<Boolean> = _isRefreshingPaintings.asStateFlow()
+
+    private val _isLoadingMorePaintings = MutableStateFlow(false)
+    val isLoadingMorePaintings: StateFlow<Boolean> = _isLoadingMorePaintings.asStateFlow()
+
     val hapticsEnabled = settingsStore.hapticsEnabledFlow.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
@@ -68,8 +81,45 @@ class WallpaperViewModel @Inject constructor(
 
     fun refreshFeed() {
         viewModelScope.launch {
-            _feed.value = sourceCatalog.abstractFeed()
+            paintingsPage = 1
+            val result = sourceCatalog.paintingsFeed(_paintingsFilters.value, page = 1)
+            _feed.value = result.wallpapers
+            paintingsHasMore = result.hasMore
             refreshSources()
+        }
+    }
+
+    fun updatePaintingsFilters(filters: PaintingsFilterSelection) {
+        _paintingsFilters.value = filters
+        refreshFeed()
+    }
+
+    fun loadMorePaintings() {
+        if (_isLoadingMorePaintings.value || !paintingsHasMore) return
+        viewModelScope.launch {
+            _isLoadingMorePaintings.value = true
+            val nextPage = paintingsPage + 1
+            val result = sourceCatalog.paintingsFeed(_paintingsFilters.value, page = nextPage)
+            val existingIds = _feed.value.map { it.id }.toHashSet()
+            _feed.value = _feed.value + result.wallpapers.filterNot { it.id in existingIds }
+            paintingsPage = nextPage
+            paintingsHasMore = result.hasMore
+            _isLoadingMorePaintings.value = false
+        }
+    }
+
+    fun pullToRefreshPaintings() {
+        viewModelScope.launch {
+            _isRefreshingPaintings.value = true
+            paintingsPage = 1
+            val result = sourceCatalog.paintingsFeed(
+                filters = _paintingsFilters.value,
+                page = 1,
+                randomize = true,
+            )
+            _feed.value = result.wallpapers
+            paintingsHasMore = result.hasMore
+            _isRefreshingPaintings.value = false
         }
     }
 
