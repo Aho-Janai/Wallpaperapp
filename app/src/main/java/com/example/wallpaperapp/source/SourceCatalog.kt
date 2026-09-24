@@ -1,5 +1,6 @@
 package com.example.wallpaperapp.source
 
+import android.util.Log
 import com.example.wallpaperapp.data.Wallpaper
 import com.example.wallpaperapp.data.WallpaperRepository
 import java.net.HttpURLConnection
@@ -170,11 +171,23 @@ class SourceCatalog @Inject constructor() {
                     connectTimeout = 10_000
                     readTimeout = 10_000
                     instanceFollowRedirects = true
+                    setRequestProperty(
+                        "User-Agent",
+                        "WallpaperApp/1.0 (https://github.com/Aho-Janai/Wallpaperapp)"
+                    )
                 }
 
+                val responseCode = connection.responseCode
+                if (responseCode !in 200..299) {
+                    val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() }
+                    connection.disconnect()
+                    error("Wikimedia API returned HTTP $responseCode: ${errorBody?.take(300)}")
+                }
                 val body = connection.inputStream.bufferedReader().use { it.readText() }
                 connection.disconnect()
                 parseResponse(body)
+            }.onFailure { e ->
+                Log.e("WikimediaApiSource", "Wikimedia fetch failed for query='$query' page=$page", e)
             }.getOrDefault(emptyList())
         }
 
