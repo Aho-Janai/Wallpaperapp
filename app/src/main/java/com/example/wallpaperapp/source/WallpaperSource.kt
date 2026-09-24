@@ -5,6 +5,7 @@ import com.example.wallpaperapp.data.Wallpaper
 interface WallpaperSource {
     val id: String
     val displayName: String
+    val isOfficialApi: Boolean
     suspend fun getPopular(page: Int): List<Wallpaper>
     suspend fun search(query: String, page: Int): List<Wallpaper>
 }
@@ -12,9 +13,11 @@ interface WallpaperSource {
 abstract class ApiWallpaperSource : WallpaperSource {
     override val id: String
         get() = javaClass.simpleName
+    override val isOfficialApi: Boolean = true
 }
 
 abstract class ScrapedWallpaperSource : WallpaperSource {
     override val id: String
         get() = javaClass.simpleName
+    override val isOfficialApi: Boolean = false
 }

@@ -5,7 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
-import com.example.wallpaperapp.ui.WallpaperHomeScreen
+import com.example.wallpaperapp.ui.WallpaperAppScreen
 import com.example.wallpaperapp.ui.theme.WallpaperAppTheme
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -15,7 +15,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             WallpaperAppTheme {
-                WallpaperHomeScreen(modifier = Modifier.fillMaxSize())
+                WallpaperAppScreen(modifier = Modifier.fillMaxSize())
             }
         }
     }
